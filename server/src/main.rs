@@ -20,8 +20,7 @@ async fn main() -> io::Result<()> {
 
     // The main task will handle listening 
     let listening_port = "5050";
-    let listener = TcpListener::bind("127.0.0.1:".to_string() + listening_port)
-        .await?;
+    let listener = TcpListener::bind("127.0.0.1:".to_string() + listening_port).await?;
 
     log::info!("Listening for incoming connections on port {listening_port}");
 
@@ -38,11 +37,14 @@ async fn main() -> io::Result<()> {
             }
         };
 
+        // Handle each connection on a separate task
         let cloned_active_websockets = Arc::clone(&active_websockets);
-        tokio::spawn(async {
+        tokio::spawn(async move {
             // Add websocket to active
             let (tx, rx) = unbounded_channel();
+            cloned_active_websockets.lock().await.insert(ip, tx.clone());
 
+            // WebSocketStream must be split in order to be useful for IO
             let (write, read) = ws_stream.split();
 
             // Select between receiveing from the server and broadcasting messages received from the websocket
@@ -50,38 +52,13 @@ async fn main() -> io::Result<()> {
                 _ = handle_received_from_client(cloned_active_websockets, read) => log::debug!("Message received from client"),
                 _ = handle_received_from_server(rx, write) => log::debug!("Message retransmitted to client"),
             }
-
-            // handle_connection(Arc::clone(&active_websockets), ws_stream, ip)
         });
 
     }
 
-
-    let mes = shared::Message::new(
-        "a".to_string(),
-        "b".to_string(),
-        "blablabla".to_string()
-    );
-    println!("{mes}");
-
-    println!("ad");
-    
     Ok(())
 }
 
-async fn handle_connection(active_ws_mutex: PeerMap, ws_stream: WebSocketStream<TcpStream>, ip: SocketAddr){
-    // Add websocket to active
-    let (tx, rx) = unbounded_channel();
-
-    let (write, read) = ws_stream.split();
-
-    // Select between receiveing from the server and broadcasting messages received from the websocket
-    select! {
-        _ = handle_received_from_client(active_ws_mutex, read) => log::debug!("Message received from client"),
-        _ = handle_received_from_server(rx, write) => log::debug!("Message retransmitted to client"),
-    }
-
-}
 
 async fn handle_received_from_client(active_websockets: PeerMap, mut stream_read: SplitStream<WebSocketStream<TcpStream>>){
     // Waits for a message from the client and then broadcasts it to all the other
@@ -89,11 +66,8 @@ async fn handle_received_from_client(active_websockets: PeerMap, mut stream_read
 
     match stream_read.next().await{
         Some(message_result) => {
-            match message_result{
-                Ok(message) => {
-                    broadcast_message(message, active_websockets).await;
-                },
-                Err(_) => todo!(),
+            if let Ok(message) = message_result{
+                broadcast_message(message, active_websockets).await;
             }
         },
         None => {
@@ -106,9 +80,8 @@ async fn broadcast_message(message: Message, active_websockets: PeerMap){
     // Broadcasts a message to all clients connected in active_websockets
 
     for (addr, sender) in active_websockets.lock().await.iter(){
-        let send_result = sender.send(message.clone());
-        if send_result.is_err(){
-            log::error!("Could not broadcast message to addr {addr}");
+        if let Err(send_error ) = sender.send(message.clone()){
+            log::error!("Could not broadcast message to addr {addr}: {send_error}");
         }
     }
 }
