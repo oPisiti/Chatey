@@ -12,3 +12,4 @@ log = {workspace = true}
 simple_logger = {workspace = true}
 tokio-tungstenite = {workspace = true}
 time = {workspace = true}
+futures-util = {workspace = true}

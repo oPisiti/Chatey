@@ -97,6 +97,7 @@ name = "client"
 version = "0.1.0"
 dependencies = [
  "crossterm",
+ "futures-util",
  "log",
  "ratatui",
  "shared",
