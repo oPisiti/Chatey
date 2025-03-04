@@ -13,3 +13,4 @@ simple_logger = {workspace = true}
 tokio-tungstenite = {workspace = true}
 time = {workspace = true}
 futures-util = {workspace = true}
+tokio-util = { version = "0.7.13", features = ["codec"] }
