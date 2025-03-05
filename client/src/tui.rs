@@ -64,11 +64,8 @@ pub async fn run(
                     None => break,
                 }
             }
-
         }
     }
-
-
 }
 
 fn handle_keyboard_event(event: Option<Result<Event, Error>>) {}

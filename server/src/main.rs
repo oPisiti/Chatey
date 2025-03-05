@@ -2,6 +2,7 @@ use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
+use shared::{HandleError, HandleResult};
 use simple_logger::SimpleLogger;
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use time::macros::format_description;
@@ -76,8 +77,18 @@ async fn main() -> io::Result<()> {
             loop {
                 // Select between receiveing from the server and broadcasting messages received from the websocket
                 select! {
-                        _ = handle_received_from_client(&cloned_active_websockets, &mut read) => log::debug!("Message received from client"),
-                        _ = handle_received_from_server(&mut rx, &mut write) => log::debug!("Message retransmitted to client"),
+                    handle_result = handle_received_from_client(&cloned_active_websockets, &mut read, ip) => {
+                        match handle_result{
+                            Ok(HandleResult::ResponseSuccessful) => log::debug!("Response successfully sent to {ip}"),
+                            Err(HandleError::MalformedMessage) => log::debug!("Malformed message received from client {ip}. Ignoring"),
+                            Err(HandleError::ConnectionDropped) => {
+                                log::debug!("Connection with client {ip} interrupted.");
+                                return;
+                            }
+                        }
+                    },
+                    // TODO: Handle this nicely
+                    _ = handle_received_from_server(&mut rx, &mut write) => log::debug!("Message retransmitted to client"),
                 }
             }
         });
@@ -91,16 +102,22 @@ async fn main() -> io::Result<()> {
 async fn handle_received_from_client(
     active_websockets: &PeerMap,
     stream_read: &mut SplitStream<WebSocketStream<TcpStream>>,
-) {
-
+    client_addr: SocketAddr,
+) -> Result<HandleResult, HandleError> {
     match stream_read.next().await {
         Some(message_result) => {
             if let Ok(message) = message_result {
                 broadcast_message(message, active_websockets).await;
+                return Ok(HandleResult::ResponseSuccessful);
             }
+
+            Err(HandleError::MalformedMessage)
         }
         None => {
-            log::error!("Could not handle message received from client");
+            log::info!("Client connection returned None. Removing client from connected peers");
+            let mut sockets = active_websockets.lock().await;
+            sockets.remove(&client_addr);
+            Err(HandleError::ConnectionDropped)
         }
     }
 }

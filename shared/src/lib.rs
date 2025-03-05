@@ -22,3 +22,13 @@ impl fmt::Display for Message {
 
     }
 }
+
+pub enum HandleResult{
+    ResponseSuccessful,
+}
+
+pub enum HandleError{
+    ConnectionDropped,
+    MalformedMessage
+}
+
