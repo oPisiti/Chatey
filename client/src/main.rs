@@ -1,12 +1,18 @@
+use std::sync::Arc;
+
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
 use simple_logger::SimpleLogger;
 use time::macros::format_description;
-use tokio::{io::stdin, net::TcpStream, select};
+use tokio::{
+    io::stdin, net::TcpStream, select, sync::{mpsc::{unbounded_channel, UnboundedSender}, Mutex}
+};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use tokio_util::codec::{FramedRead, LinesCodec};
+
+mod tui;
 
 type WSWrite = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
 type WSRead = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
@@ -23,10 +29,19 @@ async fn main() {
         std::env::var("RUST_LOG").unwrap()
     );
 
-    let url = match std::env::var("SERVE_IP") {
+    // Set server IP and port
+    let url = match std::env::var("SERVER_IP") {
         Ok(value) => value,
         Err(_) => "ws://127.0.0.1:5050".to_string(),
     };
+
+    // Set UI type: TEXT or TUI
+    let tui: bool = std::env::var("TEXT").is_err();
+    if tui{
+        std::env::set_var("RUST_LOG", "off");
+    }
+
+    std::env::set_var("RUST_LOG", "off");
 
     // Attempt to connect to server
     let (ws_stream, _) = connect_async(url)
@@ -43,20 +58,34 @@ async fn main() {
         .init()
         .unwrap();
 
-    let stdin = stdin();
-    let mut stdin_reader = FramedRead::new(stdin, LinesCodec::new());
-    let mut history: Vec<Message> = Vec::new();
-    let (mut write, mut read) = ws_stream.split();
-    loop {
-        select! {
-            _ = handle_message_from_user(&mut stdin_reader, &mut write) => log::debug!("Message captured from user"),
-            _ = handle_message_from_server(&mut read, &mut history) => log::debug!("Message received from server")
-        }
+    // Utilities
+    let history: Arc<Mutex<Vec<Message>>> = Arc::new(Mutex::new(Vec::new()));
+    let (notifier_tx, notifier_rx ) = unbounded_channel();
+
+    // Init the TUI
+    let history_clone = Arc::clone(&history);
+    if tui{
+        tokio::spawn(async {
+            let terminal = ratatui::init();
+            tui::run(terminal, history_clone, notifier_rx).await;
+            ratatui::restore();
+        });
     }
 
+    // Handle messages to and from the server
+    let stdin = stdin();
+    let mut stdin_reader = FramedRead::new(stdin, LinesCodec::new());
+    let (mut ws_stream_write, mut ws_stream_read) = ws_stream.split();
+    loop {
+        select! {
+            _ = handle_user_input(&mut stdin_reader, &mut ws_stream_write) => log::debug!("Message captured from user"),
+            _ = handle_server_message(&mut ws_stream_read, Arc::clone(&history), notifier_tx.clone()) => log::debug!("Message received from server")
+        }
+
+    }
 }
 
-async fn handle_message_from_user(
+async fn handle_user_input(
     reader: &mut FramedRead<tokio::io::Stdin, LinesCodec>,
     stream_write: &mut WSWrite,
 ) {
@@ -74,11 +103,20 @@ async fn handle_message_from_user(
     };
 }
 
-async fn handle_message_from_server(stream_read: &mut WSRead, history: &mut Vec<Message>) {
+async fn handle_server_message(stream_read: &mut WSRead, history: Arc<Mutex<Vec<Message>>>, notifier_tx: UnboundedSender<()>) {
     match stream_read.next().await {
         Some(msg_result) => match msg_result {
             Ok(msg) => {
-                history.push(msg.clone());
+                history
+                    .lock()
+                    .await
+                    .push(msg.clone());
+
+                // Notify the TUI task of changes
+                if let Err(_)= notifier_tx.send(()){
+                    log::error!("Could not notify TUI task of new message from server");
+                }
+                
                 log::info!("Received from server: {msg:?}");
             }
             Err(_) => log::error!("Received message from server is an error"),
