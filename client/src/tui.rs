@@ -1,4 +1,4 @@
-use std::{io::Error, sync::Arc};
+use std::{io::Error, iter::once, sync::Arc};
 
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use futures_util::StreamExt;
@@ -17,6 +17,7 @@ use tokio::{
 // Constants
 const MAX_MESSAGES_ON_SCREEN: u8 = 8;
 const PADDING_INSIDE: Padding = Padding::new(1, 1, 0, 0);
+const CURSOR_CHAR: &str = "_";
 
 /// Runs the TUI loop and prints the latest messages in 'history'
 /// The loop awaits until a '()' notification is received via 'notify_rx'
@@ -26,9 +27,10 @@ pub async fn run(
     history: Arc<Mutex<Vec<ChatMessage>>>,
     mut notify_rx: UnboundedReceiver<()>,
 ) -> Result<(), Error> {
-    let input_box = Arc::new(Mutex::new(Vec::new()));
+    let mut input_box = Vec::new();
     let mut keyboard_reader = event::EventStream::new();
     let mut terminal = terminal;
+
     loop {
         // Create outer block
         let outer_block = Block::default()
@@ -54,14 +56,25 @@ pub async fn run(
             })
             .collect();
 
+        // Create the input block
+        let mut input_string: String = input_box.iter().collect();
+        input_string += CURSOR_CHAR;
+        let input_block = Paragraph::new(input_string)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .padding(PADDING_INSIDE),
+            )
+            .style(Style::default().fg(Color::White).bg(Color::Black));
+
         // Draw a frame
         let draw_result = terminal.draw(|frame| {
             let outer = frame.area();
 
             // Create layouts
             let vertical = Layout::vertical(
-                [Constraint::Ratio(1, MAX_MESSAGES_ON_SCREEN.into());
-                    MAX_MESSAGES_ON_SCREEN as usize],
+                [Constraint::Ratio(1, (MAX_MESSAGES_ON_SCREEN + 1).into());
+                (MAX_MESSAGES_ON_SCREEN + 1) as usize],
             );
             let horizontal = Layout::horizontal([
                 Constraint::Percentage(40),
@@ -70,7 +83,7 @@ pub async fn run(
             ]);
 
             // Creating areas
-            let vertical_areas: [Rect; MAX_MESSAGES_ON_SCREEN as usize] =
+            let vertical_areas: [Rect; (MAX_MESSAGES_ON_SCREEN + 1) as usize] =
                 vertical.areas(outer.inner(Margin::new(1, 1)));
 
             // The final message areas are an array of [left, mid, right] areas
@@ -81,8 +94,10 @@ pub async fn run(
             }
 
             // Draw each widget
-            frame.render_widget(outer_block, outer);
-            for (i, msg) in msg_blocks.iter().enumerate() {
+            frame.render_widget(&outer_block, outer);
+
+            let blocks_iterator = once(&input_block).chain(msg_blocks.iter());
+            for (i, msg) in blocks_iterator.enumerate() {
                 frame.render_widget(msg, msg_areas[i][0]);
             }
         });
@@ -107,8 +122,9 @@ pub async fn run(
                             if char == 'c' && key.modifiers == KeyModifiers::CONTROL {break;}
 
                             // Update input box
-                            input_box.lock().await.push(char);
+                            input_box.push(char);
                         }
+                        KeyCode::Backspace => _ = input_box.pop(),
                         _ => continue,
                     }
                     _ => continue,

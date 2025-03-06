@@ -87,11 +87,11 @@ async fn main() {
 
     // Handle messages to and from the server
     let stdin = stdin();
-    let mut stdin_reader = FramedRead::new(stdin, LinesCodec::new());
+    // let mut stdin_reader = FramedRead::new(stdin, LinesCodec::new());
     let (mut ws_stream_write, mut ws_stream_read) = ws_stream.split();
     loop {
         select! {
-            _ = handle_user_input(&mut stdin_reader, Arc::clone(&history), &mut ws_stream_write) => log::debug!("Message captured from user"),
+            // _ = handle_user_input(&mut stdin_reader, Arc::clone(&history), &mut ws_stream_write) => log::debug!("Message captured from user"),
             _ = handle_server_message(&mut ws_stream_read, Arc::clone(&history), notifier_tx.clone()) => log::debug!("Message received from server")
         }
 
