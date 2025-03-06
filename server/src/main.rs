@@ -2,7 +2,7 @@ use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use shared::{HandleError, HandleResult};
+use shared::{ChatMessage, HandleError, HandleResult};
 use simple_logger::SimpleLogger;
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use time::macros::format_description;
@@ -17,7 +17,7 @@ use tokio::{
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
-type Tx = UnboundedSender<Message>;
+type Tx = UnboundedSender<ChatMessage>;
 type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;
 
 #[tokio::main]
@@ -107,7 +107,10 @@ async fn handle_received_from_client(
     match stream_read.next().await {
         Some(message_result) => {
             if let Ok(message) = message_result {
-                broadcast_message(message, active_websockets).await;
+                // Wrap the tungstenite message in a ChatMessage
+                let chat_message = ChatMessage::new(client_addr, message);
+
+                broadcast_message(chat_message, active_websockets).await;
                 return Ok(HandleResult::ResponseSuccessful);
             }
 
@@ -123,14 +126,14 @@ async fn handle_received_from_client(
 }
 
 /// Broadcasts a message to all connectec websockets in 'active_websockets'
-async fn broadcast_message(message: Message, active_websockets: &PeerMap) {
+async fn broadcast_message(message: ChatMessage, active_websockets: &PeerMap) {
     let mut inactive_addrs: Vec<SocketAddr> = Vec::new();
 
     // Broadcasts a message to all clients connected in active_websockets
     let mut actives = active_websockets.lock().await;
     for (addr, sender) in actives.iter() {
         if let Err(send_error) = sender.send(message.clone()) {
-            log::error!("Could not broadcast message to {addr}: {send_error}");
+           log::error!("Could not broadcast message to {addr}: {send_error}");
             inactive_addrs.push(*addr);
         }
     }
@@ -144,12 +147,12 @@ async fn broadcast_message(message: Message, active_websockets: &PeerMap) {
 
 /// Relays message to specified client
 async fn handle_received_from_server(
-    rx: &mut UnboundedReceiver<Message>,
+    rx: &mut UnboundedReceiver<ChatMessage>,
     write: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
 ) {
     match rx.recv().await {
         Some(message) => {
-            if write.send(message).await.is_err() {
+            if write.send(message.get_message()).await.is_err() {
                 log::error!("Could not send message back to client");
             }
         }

@@ -1,25 +1,28 @@
-use std::{fmt, time};
+use std::{fmt, net::SocketAddr, time};
+use tokio_tungstenite::tungstenite::Message;
 
-pub struct Message{
-    from: String,
-    to: String,
+#[derive(Clone)]
+pub struct ChatMessage{
+    from: SocketAddr,
     timestamp: time::Instant,
-    message: String
+    message: Message
 }
-impl Message {
-    pub fn new(from: String, to: String, message: String) -> Self{
+impl ChatMessage {
+    pub fn new(from: SocketAddr, message: Message) -> Self{
         Self{
             from,
-            to, 
             timestamp: time::Instant::now(),
             message
         }
     }
-}
-impl fmt::Display for Message {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} -> {}: {}, {} s ago", self.from, self.to, self.message, self.timestamp.elapsed().as_secs())
 
+    pub fn get_message(&self) -> Message{
+        self.message.clone()
+    }
+}
+impl fmt::Display for ChatMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} : {}, {} s ago", self.from, self.message.to_text().unwrap_or_default(), self.timestamp.elapsed().as_secs())
     }
 }
 
