@@ -19,6 +19,10 @@ impl ChatMessage {
     pub fn get_message(&self) -> Message{
         self.message.clone()
     }
+
+    pub fn get_addr(&self) -> SocketAddr{
+        self.from
+    }
 }
 impl fmt::Display for ChatMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

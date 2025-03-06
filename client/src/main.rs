@@ -80,7 +80,7 @@ async fn main() {
     if tui{
         tokio::spawn(async {
             let terminal = ratatui::init();
-            if let Err(run_error) = tui::run(terminal, history_clone, notifier_rx, input_tx).await{
+            if let Err(run_error) = tui::run(terminal, history_clone,notifier_rx, input_tx).await{
                 log::error!("Error while running TUI: {run_error}");
             };
             ratatui::restore();
@@ -91,22 +91,17 @@ async fn main() {
     let (mut ws_stream_write, mut ws_stream_read) = ws_stream.split();
     loop {
         select! {
-            _ = handle_user_input(&mut input_rx, Arc::clone(&history), &mut ws_stream_write) => log::debug!("Message captured from user"),
+            _ = handle_user_input(&mut input_rx, &mut ws_stream_write) => log::debug!("Message captured from user"),
             _ = handle_server_message(&mut ws_stream_read, Arc::clone(&history), notifier_tx.clone()) => log::debug!("Message received from server")
         }
-
     }
 }
 
 async fn handle_user_input(
     receiver: &mut UnboundedReceiver<String>,
-    history: Arc<Mutex<Vec<ChatMessage>>>,
     stream_write: &mut WSWrite,
 ) {
-    // Wait for an input message to come from the TUI
-    // let input_result = reader.recv();
-
-    // Try to send message to server
+    // Wait for an input message from the TUI
     match receiver.recv().await{
         Some(input_string) => {
             let input_as_msg = Message::from(input_string);
@@ -114,15 +109,7 @@ async fn handle_user_input(
             // Send message to server
             if let Err(err) = stream_write.send(input_as_msg.clone()).await {
                 log::error!("Could not send message to server: {err}");
-                return;
             }
-
-            // Add to history
-            let input_as_chat_msg = ChatMessage::new(SocketAddr::new(LOCALHOST, 0), input_as_msg);
-            history
-                .lock()
-                .await
-                .push(input_as_chat_msg);
         }
         None => log::error!("Input message from user not valid"),
     }

@@ -1,4 +1,4 @@
-use std::{io::Error, sync::Arc};
+use std::{io::Error, net::{IpAddr, Ipv4Addr, SocketAddr}, sync::Arc};
 
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use futures_util::StreamExt;
@@ -13,11 +13,14 @@ use tokio::{
     select,
     sync::{mpsc::{UnboundedReceiver, UnboundedSender}, Mutex},
 };
+use tokio_tungstenite::tungstenite::Message;
 
 // Constants
 const MAX_MESSAGES_ON_SCREEN: u8 = 8;
 const PADDING_INSIDE: Padding = Padding::new(1, 1, 0, 0);
 const CURSOR_CHAR: &str = "_";
+// const CLIENT_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
+const CLIENT_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
 
 /// Runs the TUI loop and prints the latest messages in 'history'
 /// The loop awaits until a '()' notification is received via 'notify_rx'
@@ -25,7 +28,7 @@ const CURSOR_CHAR: &str = "_";
 pub async fn run(
     terminal: DefaultTerminal,
     history: Arc<Mutex<Vec<ChatMessage>>>,
-    mut notify_rx: UnboundedReceiver<()>,
+    mut notifier_rx: UnboundedReceiver<()>,
     input_tx: UnboundedSender<String>
 ) -> Result<(), Error> {
     let mut input_box = Vec::new();
@@ -55,21 +58,24 @@ pub async fn run(
             .style(Style::default().fg(Color::White).bg(Color::Black));
 
         // Create message blocks
-        let msg_blocks: Vec<Paragraph> = history
+        let msg_blocks: Vec<(Paragraph, usize)> = history
             .lock()
             .await
             .iter()
             .rev()
             .take(MAX_MESSAGES_ON_SCREEN as usize)
-            .map(|chat_message| {
+            .map(|chat_message| {(
                 Paragraph::new(format!("{chat_message}"))
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
                             .padding(PADDING_INSIDE),
                     )
-                    .style(Style::default().fg(Color::White).bg(Color::Black))
-            })
+                    .style(Style::default().fg(Color::White).bg(Color::Black)
+                ),
+                if chat_message.get_addr() == CLIENT_ADDR {2}
+                else {0}
+            )})
             .collect();
 
         // Create the input block
@@ -106,8 +112,8 @@ pub async fn run(
             // Draw each widget
             frame.render_widget(&outer_block, outer);
             frame.render_widget(input_block, input_area);
-            for (i, msg) in msg_blocks.iter().enumerate() {
-                frame.render_widget(msg, msg_areas[i][0]);
+            for (i, (msg, index)) in msg_blocks.iter().enumerate() {
+                frame.render_widget(msg, msg_areas[i][*index]);
             }
         });
 
@@ -119,7 +125,7 @@ pub async fn run(
         // Wait for an event to trigger a new TUI frame
         select! {
             // Wait for a change in history notification via "notify_rx"
-            _ = notify_rx.recv() => continue,
+            _ = notifier_rx.recv() => continue,
 
             // Wait for a key to be pressed
             keyboard_event = keyboard_reader.next() => match keyboard_event{
@@ -134,9 +140,15 @@ pub async fn run(
                         }
                         KeyCode::Backspace => _ = input_box.pop(),
                         KeyCode::Enter => {
-                            if input_tx.send(input_box.iter().collect()).is_err(){
+                            let input_string: String = input_box.iter().collect();
+                            if input_tx.send(input_string.clone()).is_err(){
                                 log::error!("Could not send input message back to main")
                             };
+                            
+                            // Add input to history and clear input box
+                            history.lock().await.push(
+                                ChatMessage::new(CLIENT_ADDR, Message::from(input_string))
+                            );
                             input_box.clear();
                         },
                         _ => continue,

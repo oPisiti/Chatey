@@ -130,8 +130,13 @@ async fn broadcast_message(message: ChatMessage, active_websockets: &PeerMap) {
     let mut inactive_addrs: Vec<SocketAddr> = Vec::new();
 
     // Broadcasts a message to all clients connected in active_websockets
-    let mut actives = active_websockets.lock().await;
+    let mut actives = active_websockets
+        .lock()
+        .await;
+
     for (addr, sender) in actives.iter() {
+        if *addr == message.get_addr(){continue;}
+
         if let Err(send_error) = sender.send(message.clone()) {
            log::error!("Could not broadcast message to {addr}: {send_error}");
             inactive_addrs.push(*addr);
