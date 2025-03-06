@@ -11,7 +11,7 @@ use ratatui::{
 use shared::ChatMessage;
 use tokio::{
     select,
-    sync::{mpsc::UnboundedReceiver, Mutex},
+    sync::{mpsc::{UnboundedReceiver, UnboundedSender}, Mutex},
 };
 
 // Constants
@@ -26,6 +26,7 @@ pub async fn run(
     terminal: DefaultTerminal,
     history: Arc<Mutex<Vec<ChatMessage>>>,
     mut notify_rx: UnboundedReceiver<()>,
+    input_tx: UnboundedSender<String>
 ) -> Result<(), Error> {
     let mut input_box = Vec::new();
     let mut keyboard_reader = event::EventStream::new();
@@ -110,7 +111,7 @@ pub async fn run(
         // Wait for an event to trigger a new TUI frame
         select! {
             // Wait for a change in history notification via "notify_rx"
-            _ = notify_rx.recv() => todo!(),
+            _ = notify_rx.recv() => continue,
 
             // TODO: Properly deal with all possibillities
             // Wait for a key to be pressed
@@ -125,6 +126,12 @@ pub async fn run(
                             input_box.push(char);
                         }
                         KeyCode::Backspace => _ = input_box.pop(),
+                        KeyCode::Enter => {
+                            if input_tx.send(input_box.iter().collect()).is_err(){
+                                log::error!("Could not send input message back to main")
+                            };
+                            input_box.clear();
+                        },
                         _ => continue,
                     }
                     _ => continue,

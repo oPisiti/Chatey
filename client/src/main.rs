@@ -8,10 +8,9 @@ use shared::ChatMessage;
 use simple_logger::SimpleLogger;
 use time::macros::format_description;
 use tokio::{
-    io::stdin, net::TcpStream, select, sync::{mpsc::{unbounded_channel, UnboundedSender}, Mutex}
+    net::TcpStream, select, sync::{mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender}, Mutex}
 };
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
-use tokio_util::codec::{FramedRead, LinesCodec};
 
 mod tui;
 
@@ -65,7 +64,8 @@ async fn main() {
 
     // Utilities
     let history: Arc<Mutex<Vec<ChatMessage>>> = Arc::new(Mutex::new(Vec::new()));
-    let (notifier_tx, notifier_rx ) = unbounded_channel();
+    let (notifier_tx, notifier_rx ) = unbounded_channel();     
+    let (input_tx, mut input_rx) = unbounded_channel();
 
     // TODO: Remove after tests
     for i in 0..4{
@@ -80,18 +80,18 @@ async fn main() {
     if tui{
         tokio::spawn(async {
             let terminal = ratatui::init();
-            tui::run(terminal, history_clone, notifier_rx).await;
+            if let Err(run_error) = tui::run(terminal, history_clone, notifier_rx, input_tx).await{
+                log::error!("Error while running TUI: {run_error}");
+            };
             ratatui::restore();
         });
     }
 
     // Handle messages to and from the server
-    let stdin = stdin();
-    // let mut stdin_reader = FramedRead::new(stdin, LinesCodec::new());
     let (mut ws_stream_write, mut ws_stream_read) = ws_stream.split();
     loop {
         select! {
-            // _ = handle_user_input(&mut stdin_reader, Arc::clone(&history), &mut ws_stream_write) => log::debug!("Message captured from user"),
+            _ = handle_user_input(&mut input_rx, Arc::clone(&history), &mut ws_stream_write) => log::debug!("Message captured from user"),
             _ = handle_server_message(&mut ws_stream_read, Arc::clone(&history), notifier_tx.clone()) => log::debug!("Message received from server")
         }
 
@@ -99,34 +99,33 @@ async fn main() {
 }
 
 async fn handle_user_input(
-    reader: &mut FramedRead<tokio::io::Stdin, LinesCodec>,
+    receiver: &mut UnboundedReceiver<String>,
     history: Arc<Mutex<Vec<ChatMessage>>>,
     stream_write: &mut WSWrite,
 ) {
-    // Listen for input form the terminal (user message)
-    if let Some(input_result) = reader.next().await {
+    // Wait for an input message to come from the TUI
+    // let input_result = reader.recv();
 
-        // Try to send message to server
-        match input_result {
-            Ok(input_string) => {
-                let input_as_msg = Message::from(input_string);
+    // Try to send message to server
+    match receiver.recv().await{
+        Some(input_string) => {
+            let input_as_msg = Message::from(input_string);
 
-                // Send message to server
-                if let Err(err) = stream_write.send(input_as_msg.clone()).await {
-                    log::error!("Could not send message to server: {err}");
-                    return;
-                }
-
-                // Add to history
-                let input_as_chat_msg = ChatMessage::new(SocketAddr::new(LOCALHOST, 0), input_as_msg);
-                history
-                    .lock()
-                    .await
-                    .push(input_as_chat_msg);
+            // Send message to server
+            if let Err(err) = stream_write.send(input_as_msg.clone()).await {
+                log::error!("Could not send message to server: {err}");
+                return;
             }
-            Err(_) => log::error!("Input message from user not valid"),
+
+            // Add to history
+            let input_as_chat_msg = ChatMessage::new(SocketAddr::new(LOCALHOST, 0), input_as_msg);
+            history
+                .lock()
+                .await
+                .push(input_as_chat_msg);
         }
-    };
+        None => log::error!("Input message from user not valid"),
+    }
 }
 
 async fn handle_server_message(stream_read: &mut WSRead, history: Arc<Mutex<Vec<ChatMessage>>>, notifier_tx: UnboundedSender<()>) {
@@ -140,8 +139,8 @@ async fn handle_server_message(stream_read: &mut WSRead, history: Arc<Mutex<Vec<
                     .push(chat_msg);
 
                 // Notify the TUI task of changes
-                if let Err(_)= notifier_tx.send(()){
-                    log::error!("Could not notify TUI task of new message from server");
+                if let Err(notifier_error) = notifier_tx.send(()){
+                    log::error!("Could not notify TUI task of new message from server: {notifier_error}");
                 }
                 
                 log::info!("Received from server: {msg:?}");
