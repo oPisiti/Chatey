@@ -1,14 +1,12 @@
-use std::{net::{IpAddr, Ipv4Addr, SocketAddr}, sync::Arc};
+use std::{net::{IpAddr, Ipv4Addr, SocketAddr}, sync::Arc, time::Duration};
 
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
 use shared::ChatMessage;
-use simple_logger::SimpleLogger;
-use time::macros::format_description;
 use tokio::{
-    net::TcpStream, select, sync::{mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender}, Mutex}
+    net::TcpStream, select, sync::{mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender}, Mutex}, time::sleep
 };
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
@@ -28,39 +26,23 @@ async fn main() {
         std::env::set_var("RUST_LOG", "info")
     }
 
-    println!(
-        "Logging level set to {:?}",
-        std::env::var("RUST_LOG").unwrap()
-    );
-
     // Set server IP and port
     let url = match std::env::var("SERVER_IP") {
         Ok(value) => value,
         Err(_) => "ws://127.0.0.1:5050".to_string(),
     };
 
-    // Set UI type: TEXT or TUI
-    let tui: bool = std::env::var("TEXT").is_err();
-    if tui{
-        std::env::set_var("RUST_LOG", "off");
-    }
-
-    std::env::set_var("RUST_LOG", "off");
+    // Init logger
+    simple_logging::log_to_file("chatey_client.log", log::LevelFilter::Info).expect("Unable to set log to file");
 
     // Attempt to connect to server
-    let (ws_stream, _) = connect_async(url)
-        .await
-        .expect("Failed to connect to server");
-
-    // Init logger
-    SimpleLogger::new()
-        .with_level(log::LevelFilter::Trace)
-        .env()
-        .with_timestamp_format(format_description!(
-            "[year]-[month]-[day] [hour]:[minute]:[second]"
-        ))
-        .init()
-        .unwrap();
+    let ws_stream = loop {
+        if let Ok((ws_stream, _)) = connect_async(&url).await{
+            break ws_stream;
+        }
+        println!("Failed to connect to server. Retrying in 5 s");
+        sleep(Duration::from_secs(5)).await;
+    };
 
     // Utilities
     let history: Arc<Mutex<Vec<ChatMessage>>> = Arc::new(Mutex::new(Vec::new()));
@@ -77,15 +59,13 @@ async fn main() {
 
     // Init the TUI
     let history_clone = Arc::clone(&history);
-    if tui{
-        tokio::spawn(async {
-            let terminal = ratatui::init();
-            if let Err(run_error) = tui::run(terminal, history_clone,notifier_rx, input_tx).await{
-                log::error!("Error while running TUI: {run_error}");
-            };
-            ratatui::restore();
-        });
-    }
+    tokio::spawn(async {
+        let terminal = ratatui::init();
+        if let Err(run_error) = tui::run(terminal, history_clone,notifier_rx, input_tx).await{
+            log::error!("Error while running TUI: {run_error}");
+        };
+        ratatui::restore();
+    });
 
     // Handle messages to and from the server
     let (mut ws_stream_write, mut ws_stream_read) = ws_stream.split();
