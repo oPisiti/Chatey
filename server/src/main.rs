@@ -2,7 +2,7 @@ use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use shared::{ChatMessage, HandleError, HandleResult};
+use shared::{ChatMessage, ClientMessage, HandleError, HandleResult};
 use simple_logger::SimpleLogger;
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use time::macros::format_description;
@@ -19,6 +19,7 @@ use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
 type Tx = UnboundedSender<ChatMessage>;
 type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;
+type UsernameMap = Arc<Mutex<HashMap<SocketAddr, String>>>;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -49,6 +50,7 @@ async fn main() -> io::Result<()> {
     log::info!("Listening for incoming connections on port {listening_port}");
 
     // Listen for connections and try to upgrade to websocket
+    let connection_to_username: UsernameMap = Arc::new(Mutex::new(HashMap::new()));
     let active_websockets: PeerMap = Arc::new(Mutex::new(HashMap::new()));
     while let Ok((stream, ip)) = listener.accept().await {
         log::info!("Accepted a tcp connection from {ip}. Attempting to upgrade to WebSocket...");
@@ -65,10 +67,17 @@ async fn main() -> io::Result<()> {
 
         // Handle each connection on a separate task
         let cloned_active_websockets = Arc::clone(&active_websockets);
+        let cloned_con_to_username = Arc::clone(&connection_to_username);
         tokio::spawn(async move {
             // Add websocket to active
             let (tx, mut rx) = unbounded_channel();
             cloned_active_websockets.lock().await.insert(ip, tx.clone());
+
+            // TODO: Implement properly
+            cloned_con_to_username
+                .lock()
+                .await
+                .insert(ip, "Generic Guy".to_string());
 
             // WebSocketStream must be split in order to be useful for IO
             let (mut write, mut read) = ws_stream.split();
@@ -77,14 +86,15 @@ async fn main() -> io::Result<()> {
             loop {
                 // Select between receiveing from the server and broadcasting messages received from the websocket
                 select! {
-                    handle_result = handle_received_from_client(&cloned_active_websockets, &mut read, ip) => {
+                    handle_result = handle_received_from_client(&cloned_active_websockets, &cloned_con_to_username, &mut read, ip) => {
                         match handle_result{
                             Ok(HandleResult::ResponseSuccessful) => log::debug!("Response successfully sent to {ip}"),
                             Err(HandleError::MalformedMessage) => log::debug!("Malformed message received from client {ip}. Ignoring"),
                             Err(HandleError::ConnectionDropped) => {
                                 log::debug!("Connection with client {ip} interrupted.");
                                 return;
-                            }
+                            },
+                            Err(HandleError::UnkownClient) => log::error!("Unkown client"),
                         }
                     },
                     // TODO: Handle this nicely
@@ -101,14 +111,24 @@ async fn main() -> io::Result<()> {
 /// connected piers.
 async fn handle_received_from_client(
     active_websockets: &PeerMap,
+    con_to_username: &UsernameMap,
     stream_read: &mut SplitStream<WebSocketStream<TcpStream>>,
     client_addr: SocketAddr,
 ) -> Result<HandleResult, HandleError> {
+
     match stream_read.next().await {
         Some(message_result) => {
             if let Ok(message) = message_result {
                 // Wrap the tungstenite message in a ChatMessage
-                let chat_message = ChatMessage::new(client_addr, message);
+                let username = con_to_username
+                    .lock()
+                    .await
+                    .get(&client_addr)
+                    .ok_or(HandleError::UnkownClient)?
+                    .to_owned();
+
+                let chat_message = ChatMessage::build(client_addr, username, message.to_string())
+                    .ok_or(HandleError::MalformedMessage)?;
 
                 broadcast_message(chat_message, active_websockets).await;
                 return Ok(HandleResult::ResponseSuccessful);
@@ -157,8 +177,15 @@ async fn handle_received_from_server(
 ) {
     match rx.recv().await {
         Some(message) => {
-            if write.send(message.get_message()).await.is_err() {
-                log::error!("Could not send message back to client");
+            // Create a ClientMessage
+            let client_msg = ClientMessage::from(message);
+
+            // Serialize and send
+            match serde_json::to_string(&client_msg){
+                Ok(ser_msg) => if write.send(Message::Text(ser_msg.into())).await.is_err() {
+                    log::error!("Could not send message back to client");
+                }
+                Err(err) => log::error!("Could not serialize message to be relayed to client: {err}")
             }
         }
         None => log::error!("Nothing came back from recv :("),

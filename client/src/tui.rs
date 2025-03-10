@@ -1,4 +1,4 @@
-use std::{io::Error, net::{IpAddr, Ipv4Addr, SocketAddr}, sync::Arc};
+use std::{io::Error, sync::Arc};
 
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use futures_util::StreamExt;
@@ -8,25 +8,24 @@ use ratatui::{
     widgets::{Block, Borders, Padding, Paragraph},
     DefaultTerminal,
 };
-use shared::ChatMessage;
+use shared::ClientMessage;
 use tokio::{
     select,
     sync::{mpsc::{UnboundedReceiver, UnboundedSender}, Mutex},
 };
-use tokio_tungstenite::tungstenite::Message;
 
 // Constants
 const MAX_MESSAGES_ON_SCREEN: u8 = 8;
 const PADDING_INSIDE: Padding = Padding::new(1, 1, 0, 0);
 const CURSOR_CHAR: &str = "_";
-const CLIENT_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+const CLIENT_USERNAME: &str = "You";
 
 /// Runs the TUI loop and prints the latest messages in 'history'
 /// The loop awaits until a '()' notification is received via 'notify_rx'
 /// The TUI will NOT be updated otherwise
 pub async fn run_chat(
     terminal: DefaultTerminal,
-    history: Arc<Mutex<Vec<ChatMessage>>>,
+    history: Arc<Mutex<Vec<ClientMessage>>>,
     mut notifier_rx: UnboundedReceiver<()>,
     input_tx: UnboundedSender<String>
 ) -> Result<(), Error> {
@@ -64,7 +63,7 @@ pub async fn run_chat(
             .rev()
             .take(MAX_MESSAGES_ON_SCREEN as usize)
             .map(|chat_message| {(
-                Paragraph::new(format!("{chat_message}"))
+                Paragraph::new(chat_message.get_message().to_owned())
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
@@ -72,7 +71,7 @@ pub async fn run_chat(
                     )
                     .style(Style::default().fg(Color::White).bg(Color::Black)
                 ),
-                if chat_message.get_addr() == CLIENT_ADDR {2}
+                if chat_message.get_username() == CLIENT_USERNAME {2}
                 else {0}
             )})
             .collect();
@@ -146,7 +145,7 @@ pub async fn run_chat(
                             
                             // Add input to history and clear input box
                             history.lock().await.push(
-                                ChatMessage::new(CLIENT_ADDR, Message::from(input_string))
+                                ClientMessage::new("You".to_string(), input_string)
                             );
                             input_box.clear();
                         },
@@ -163,8 +162,8 @@ pub async fn run_chat(
 }
 
 
-/// Creates a startup screen and prompts user for a username
-/// Returns a result containing the username as a string after the first Enter keypress
-fn run_username(terminal: DefaultTerminal) -> Result<String, Error>{
-
-}
+// / Creates a startup screen and prompts user for a username
+// / Returns a result containing the username as a string after the first Enter keypress
+// fn run_username(terminal: DefaultTerminal) -> Result<String, Error>{
+//
+// }

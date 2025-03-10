@@ -1,10 +1,10 @@
-use std::{net::{IpAddr, Ipv4Addr, SocketAddr}, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use shared::ChatMessage;
+use shared::ClientMessage;
 use tokio::{
     net::TcpStream, select, sync::{mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender}, Mutex}, time::sleep
 };
@@ -15,9 +15,6 @@ mod tui;
 // Aliases
 type WSWrite = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
 type WSRead = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
-
-// Global Constants
-const LOCALHOST: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 
 #[tokio::main]
 async fn main() {
@@ -45,19 +42,19 @@ async fn main() {
     };
 
     // Get username
-    let username = run_username().unwrap();
+    // let username = run_username().unwrap();
 
     // Utilities
-    let history: Arc<Mutex<Vec<ChatMessage>>> = Arc::new(Mutex::new(Vec::new()));
+    let history: Arc<Mutex<Vec<ClientMessage>>> = Arc::new(Mutex::new(Vec::new()));
     let (notifier_tx, notifier_rx ) = unbounded_channel();     
     let (input_tx, mut input_rx) = unbounded_channel();
 
     // TODO: Remove after tests
-    for i in 0..4{
+    for _ in 0..4{
         history
             .lock()
             .await
-            .push(ChatMessage::new(SocketAddr::new(LOCALHOST, 0), format!("{i}").into()));
+            .push(ClientMessage::new("George".to_string(), "Hellooo".to_string()));
     }
 
     // Init the TUI
@@ -98,22 +95,28 @@ async fn handle_user_input(
     }
 }
 
-async fn handle_server_message(stream_read: &mut WSRead, history: Arc<Mutex<Vec<ChatMessage>>>, notifier_tx: UnboundedSender<()>) {
+async fn handle_server_message(stream_read: &mut WSRead, history: Arc<Mutex<Vec<ClientMessage>>>, notifier_tx: UnboundedSender<()>) {
     match stream_read.next().await {
         Some(msg_result) => match msg_result {
-            Ok(msg) => {
-                let chat_msg = ChatMessage::new(SocketAddr::new(LOCALHOST, 0), msg.clone());
-                history
-                    .lock()
-                    .await
-                    .push(chat_msg);
+            Ok(msg) => match serde_json::from_str(msg.to_string().as_str()) {
+                Ok(rec_msg) => {
+                    // Append to history
+                    history
+                        .lock()
+                        .await
+                        .push(rec_msg);
 
-                // Notify the TUI task of changes
-                if let Err(notifier_error) = notifier_tx.send(()){
-                    log::error!("Could not notify TUI task of new message from server: {notifier_error}");
+                    // Notify the TUI task of changes
+                    if let Err(notifier_error) = notifier_tx.send(()){
+                        log::error!("Could not notify TUI task of new message from server: {notifier_error}");
+                    }
+                    
+                    log::info!("Received from server: {msg:?}");
                 }
-                
-                log::info!("Received from server: {msg:?}");
+                Err(err) => {
+                    log::error!("Could not deserialize message from server: {err}");
+                }
+            
             }
             Err(_) => log::error!("Received message from server is an error"),
         },
