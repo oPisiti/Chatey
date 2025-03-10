@@ -19,13 +19,12 @@ use tokio_tungstenite::tungstenite::Message;
 const MAX_MESSAGES_ON_SCREEN: u8 = 8;
 const PADDING_INSIDE: Padding = Padding::new(1, 1, 0, 0);
 const CURSOR_CHAR: &str = "_";
-// const CLIENT_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
 const CLIENT_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
 
 /// Runs the TUI loop and prints the latest messages in 'history'
 /// The loop awaits until a '()' notification is received via 'notify_rx'
 /// The TUI will NOT be updated otherwise
-pub async fn run(
+pub async fn run_chat(
     terminal: DefaultTerminal,
     history: Arc<Mutex<Vec<ChatMessage>>>,
     mut notifier_rx: UnboundedReceiver<()>,
@@ -161,4 +160,11 @@ pub async fn run(
         }
     }
     Ok(())
+}
+
+
+/// Creates a startup screen and prompts user for a username
+/// Returns a result containing the username as a string after the first Enter keypress
+fn run_username(terminal: DefaultTerminal) -> Result<String, Error>{
+
 }
