@@ -3,10 +3,7 @@ use std::{io::Error, sync::Arc};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use futures_util::StreamExt;
 use ratatui::{
-    layout::{Constraint, Layout, Margin, Rect},
-    style::{Color, Style},
-    widgets::{Block, Borders, Padding, Paragraph},
-    DefaultTerminal,
+    layout::{Constraint, Layout, Margin, Rect}, style::{Color, Style}, text::Line, widgets::{Block, Borders, Padding, Paragraph}, DefaultTerminal
 };
 use shared::ClientMessage;
 use tokio::{
@@ -38,10 +35,10 @@ pub async fn run_chat(
         Constraint::Percentage(90),
         Constraint::Fill(1),
     ]);
-    let msg_vertical_layout = Layout::vertical(
-        [Constraint::Ratio(1, MAX_MESSAGES_ON_SCREEN.into());
-        MAX_MESSAGES_ON_SCREEN as usize],
-    );
+    let msg_vertical_layout = Layout::vertical([
+        Constraint::Ratio(1, MAX_MESSAGES_ON_SCREEN.into());
+        MAX_MESSAGES_ON_SCREEN as usize
+    ]);
     let msg_horizontal_layout = Layout::horizontal([
         Constraint::Percentage(40),
         Constraint::Fill(1),
@@ -62,18 +59,27 @@ pub async fn run_chat(
             .iter()
             .rev()
             .take(MAX_MESSAGES_ON_SCREEN as usize)
-            .map(|chat_message| {(
-                Paragraph::new(chat_message.get_message().to_owned())
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .padding(PADDING_INSIDE),
+            .map(|client_message| {
+                let position_index: usize = match client_message.get_username().as_str(){
+                    CLIENT_USERNAME => 2,
+                    _ => 0
+                };
+
+                (Paragraph::new(client_message.get_message().to_owned())
+                    .block(Block::bordered()
+                        .title_bottom(match position_index{
+                            0 => Line::from(client_message.get_metadata()).left_aligned(),
+                            2 => Line::from(client_message.get_metadata()).right_aligned(),
+                            _ => {
+                                log::error!("Something really wrong happend, whl?");
+                                Line::default()
+                            }
+                        })
+                        .padding(PADDING_INSIDE),
                     )
-                    .style(Style::default().fg(Color::White).bg(Color::Black)
-                ),
-                if chat_message.get_username() == CLIENT_USERNAME {2}
-                else {0}
-            )})
+                    .style(Style::default().fg(Color::White).bg(Color::Black)),
+                position_index)
+            })
             .collect();
 
         // Create the input block

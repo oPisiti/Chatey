@@ -83,6 +83,11 @@ impl ClientMessage{
     pub fn from(input: ChatMessage) -> Self{
         Self::new(input.get_username(), input.get_message())
     }
+
+    /// Returns a pretty string containing user and timestamp
+    pub fn get_metadata(&self) -> String{
+        format!("{}, {} s ago", self.from_username, self.timestamp.elapsed().as_secs())
+    }
 }
 
 pub enum HandleResult{
