@@ -3,7 +3,7 @@ use std::{io::Error, sync::Arc};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use futures_util::StreamExt;
 use ratatui::{
-    layout::{Constraint, Layout, Margin, Rect}, style::{Color, Style}, text::Line, widgets::{Block, Borders, Padding, Paragraph}, DefaultTerminal
+    layout::{Constraint, Layout, Margin, Rect}, style::{Color, Style}, text::Line, widgets::{Block, BorderType, Borders, Padding, Paragraph}, DefaultTerminal
 };
 use shared::ClientMessage;
 use tokio::{
@@ -31,7 +31,7 @@ pub async fn run_chat(
     let mut terminal = terminal;
 
     // Create layouts
-    let mag_input_layout = Layout::vertical([
+    let msg_input_layout = Layout::vertical([
         Constraint::Percentage(90),
         Constraint::Fill(1),
     ]);
@@ -65,20 +65,23 @@ pub async fn run_chat(
                     _ => 0
                 };
 
-                (Paragraph::new(client_message.get_message().to_owned())
+                // Define the message title (at the bottom of the paragraph)
+                let mut title = Line::from(client_message.get_metadata());
+                if position_index == 0 {title = title.left_aligned()}
+                else if position_index == 2 {title = title.right_aligned()}
+
+                // Define the paragraph
+                let mut parag = Paragraph::new(client_message.get_message().to_owned())
                     .block(Block::bordered()
-                        .title_bottom(match position_index{
-                            0 => Line::from(client_message.get_metadata()).left_aligned(),
-                            2 => Line::from(client_message.get_metadata()).right_aligned(),
-                            _ => {
-                                log::error!("Something really wrong happend, whl?");
-                                Line::default()
-                            }
-                        })
-                        .padding(PADDING_INSIDE),
+                        .title_bottom(title)
+                        .padding(PADDING_INSIDE)
+                        .border_type(BorderType::Rounded),
                     )
-                    .style(Style::default().fg(Color::White).bg(Color::Black)),
-                position_index)
+                    .style(Style::default().fg(Color::White).bg(Color::Black));
+
+                if position_index == 2 {parag = parag.right_aligned()} 
+
+                (parag, position_index)
             })
             .collect();
 
@@ -88,7 +91,7 @@ pub async fn run_chat(
         let input_block = Paragraph::new(input_string)
             .block(
                 Block::default()
-                    .borders(Borders::ALL)
+                    .borders(Borders::TOP)
                     .padding(PADDING_INSIDE),
             )
             .style(Style::default().fg(Color::White).bg(Color::Black));
@@ -100,7 +103,7 @@ pub async fn run_chat(
             let outer = frame.area();
 
             // Devide outer into a messages box and an input box
-            let [msg_box, input_area] = mag_input_layout.areas(outer.inner(Margin::new(1, 1)));
+            let [msg_box, input_area] = msg_input_layout.areas(outer.inner(Margin::new(1, 1)));
 
             // Devide the messages box into vertival parts
             let vertical_areas: [Rect; MAX_MESSAGES_ON_SCREEN as usize] =
