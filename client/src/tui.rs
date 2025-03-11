@@ -3,7 +3,7 @@ use std::{io::Error, sync::Arc};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use futures_util::StreamExt;
 use ratatui::{
-    layout::{Constraint, Layout, Margin, Rect}, style::{Color, Style}, text::Line, widgets::{Block, BorderType, Borders, Padding, Paragraph}, DefaultTerminal
+    layout::{Constraint, Flex, Layout, Margin, Rect}, style::{Color, Style}, text::Line, widgets::{Block, BorderType, Borders, Padding, Paragraph}, DefaultTerminal
 };
 use shared::ClientMessage;
 use tokio::{
@@ -17,6 +17,13 @@ const PADDING_INSIDE: Padding = Padding::new(1, 1, 0, 0);
 const CURSOR_CHAR: &str = "_";
 const CLIENT_USERNAME: &str = "You";
 
+/// Custom enum for keyboard handling
+enum HandlingSignal{
+    Continue,
+    End,
+    Quit,
+}
+
 /// Runs the TUI loop and prints the latest messages in 'history'
 /// The loop awaits until a '()' notification is received via 'notify_rx'
 /// The TUI will NOT be updated otherwise
@@ -27,10 +34,18 @@ pub async fn run_chat(
     input_tx: UnboundedSender<String>
 ) -> Result<(), Error> {
     let mut input_box = Vec::new();
+    let mut username = Vec::new();
     let mut keyboard_reader = event::EventStream::new();
     let mut terminal = terminal;
 
     // Create layouts
+    let username_vert_layout = Layout::vertical([
+        Constraint::Percentage(20)
+    ]);
+    let username_horizontal_layout = Layout::horizontal([
+        Constraint::Percentage(50)
+    ])
+        .flex(Flex::Center);
     let msg_input_layout = Layout::vertical([
         Constraint::Percentage(90),
         Constraint::Fill(1),
@@ -45,6 +60,39 @@ pub async fn run_chat(
         Constraint::Percentage(40),
     ]);
 
+    // Prompt the user for a username
+    loop{
+        let username_block = Paragraph::new(username.iter().collect::<String>() + CURSOR_CHAR)
+            .block(Block::bordered()
+                .padding(PADDING_INSIDE)
+                .title_top(Line::from("Set a username").centered())
+            )
+            .style(Style::default().fg(Color::White).bg(Color::Black));
+
+        let draw_result = terminal.draw(|frame|{
+            let [username_vert_area] = username_vert_layout.areas(frame.area().inner(Margin::new(1, 1)));
+            let [username_area] = username_horizontal_layout.areas(username_vert_area);
+            frame.render_widget(username_block, username_area);
+        });
+
+        // Deal with draw result
+        if draw_result.is_err() {
+            log::error!("Failed to render frame: {}", draw_result.unwrap_err());
+        }
+        
+        // Handle input
+        let keyboard_handler_signal = handle_keyboard_event(keyboard_reader.next().await, &mut username);
+        match keyboard_handler_signal{
+            HandlingSignal::Continue => continue,
+            HandlingSignal::End => break,
+            HandlingSignal::Quit => return Err(std::io::Error::other("")),
+        }
+    }
+
+    // TODO: Send username to server
+
+    // TODO: Change block from default to bordered
+    // Main chat loop
     loop {
         // Create outer block
         let outer_block = Block::default()
@@ -103,11 +151,11 @@ pub async fn run_chat(
             let outer = frame.area();
 
             // Devide outer into a messages box and an input box
-            let [msg_box, input_area] = msg_input_layout.areas(outer.inner(Margin::new(1, 1)));
+            let [msg_area, input_area] = msg_input_layout.areas(outer.inner(Margin::new(1, 1)));
 
             // Devide the messages box into vertival parts
             let vertical_areas: [Rect; MAX_MESSAGES_ON_SCREEN as usize] =
-                msg_vertical_layout.areas(msg_box);
+                msg_vertical_layout.areas(msg_area);
 
             // The final message areas are an array of [left, mid, right] areas
             // Each message area is meant to be used with a single of the three areas
@@ -168,6 +216,46 @@ pub async fn run_chat(
         }
     }
     Ok(())
+}
+
+/// Handles a single keyboard event and returns a signal
+/// Will write char to buffer, as well as pop from it in case of Backspace input
+fn handle_keyboard_event(keyboard_event: Option<Result<Event, Error>>, buffer: &mut Vec<char>) -> HandlingSignal {
+    match keyboard_event{
+        Some(Ok(event)) => match event {
+            Event::Key(key) => match key.code{
+                KeyCode::Esc => return HandlingSignal::Quit,
+                KeyCode::Char(char) =>{
+                    if char == 'c' && key.modifiers == KeyModifiers::CONTROL {
+                        return HandlingSignal::Quit
+                    }
+
+                    // Update input box
+                    buffer.push(char);
+                }
+                KeyCode::Backspace => _ = buffer.pop(),
+                KeyCode::Enter => {
+                    return HandlingSignal::End;
+                    // let input_string: String = input_box.iter().collect();
+                    // if input_tx.send(input_string.clone()).is_err(){
+                    //     log::error!("Could not send input message back to main")
+                    // };
+                    // 
+                    // // Add input to history and clear input box
+                    // history.lock().await.push(
+                    //     ClientMessage::new("You".to_string(), input_string)
+                    // );
+                    // input_box.clear();
+                },
+                _ => return HandlingSignal::Continue,
+            }
+            _ => return HandlingSignal::Continue,
+        },
+        Some(Err(_)) => return HandlingSignal::Quit,
+        None => return HandlingSignal::Quit,
+    }
+
+    HandlingSignal::Continue
 }
 
 
