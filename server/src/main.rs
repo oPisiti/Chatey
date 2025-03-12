@@ -15,7 +15,11 @@ use tokio::{
         Mutex,
     },
 };
-use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
+use tokio_tungstenite::{
+    accept_async,
+    tungstenite::{Error, Message},
+    WebSocketStream,
+};
 
 type Tx = UnboundedSender<ChatMessage>;
 type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;
@@ -73,14 +77,30 @@ async fn main() -> io::Result<()> {
             let (tx, mut rx) = unbounded_channel();
             cloned_active_websockets.lock().await.insert(ip, tx.clone());
 
-            // TODO: Implement properly
-            cloned_con_to_username
-                .lock()
-                .await
-                .insert(ip, "Generic Guy".to_string());
-
-            // WebSocketStream must be split in order to be useful for IO
+            // Expect a message which should contain the username
             let (mut write, mut read) = ws_stream.split();
+            let username = match read.next().await {
+                Some(name_result) => match name_result {
+                    Ok(name) => name.to_string(),
+                    Err(err) => {
+                        log::error!("Invalid username message: {err}. Closing connection");
+                        if close_websocket_stream(write, read).await.is_err() {
+                            log::error!("Could not close connection. Aborting all");
+                        };
+                        return;
+                    }
+                },
+                None => {
+                    log::error!("Invalid username message. Closing connection");
+                    if close_websocket_stream(write, read).await.is_err() {
+                        log::error!("Could not close connection. Aborting all");
+                    };
+                    return;
+                }
+            };
+
+            // Save the username in the hashmap
+            cloned_con_to_username.lock().await.insert(ip, username);
 
             // Keep listening for messages from client or from server
             loop {
@@ -88,7 +108,7 @@ async fn main() -> io::Result<()> {
                 select! {
                     handle_result = handle_received_from_client(&cloned_active_websockets, &cloned_con_to_username, &mut read, ip) => {
                         match handle_result{
-                            Ok(HandleResult::ResponseSuccessful) => log::debug!("Response successfully sent to {ip}"),
+                            Ok(HandleResult::ResponseSuccessful) => log::debug!("Response successfully sent to {} ({ip})", cloned_con_to_username.lock().await.get(&ip).unwrap_or(&"Unknown".to_string())),
                             Err(HandleError::MalformedMessage) => log::debug!("Malformed message received from client {ip}. Ignoring"),
                             Err(HandleError::ConnectionDropped) => {
                                 log::debug!("Connection with client {ip} interrupted.");
@@ -107,6 +127,28 @@ async fn main() -> io::Result<()> {
     Ok(())
 }
 
+/// Closes a websocket stream that has been split into two
+async fn close_websocket_stream(
+    mut write: SplitSink<WebSocketStream<TcpStream>, Message>,
+    mut read: SplitStream<WebSocketStream<TcpStream>>,
+) -> Result<(), Error> {
+    // Send a close message
+    write.send(Message::Close(None)).await?;
+
+    // Keep pulling from read stream until nothing more is left
+    while let Some(msg) = read.next().await {
+        match msg {
+            Ok(msg) => {
+                if msg.is_close() {
+                    return Ok(());
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
 /// Waits for a message from the client and then broadcasts it to all the other
 /// connected piers.
 async fn handle_received_from_client(
@@ -115,7 +157,6 @@ async fn handle_received_from_client(
     stream_read: &mut SplitStream<WebSocketStream<TcpStream>>,
     client_addr: SocketAddr,
 ) -> Result<HandleResult, HandleError> {
-
     match stream_read.next().await {
         Some(message_result) => {
             if let Ok(message) = message_result {
@@ -150,15 +191,15 @@ async fn broadcast_message(message: ChatMessage, active_websockets: &PeerMap) {
     let mut inactive_addrs: Vec<SocketAddr> = Vec::new();
 
     // Broadcasts a message to all clients connected in active_websockets
-    let mut actives = active_websockets
-        .lock()
-        .await;
+    let mut actives = active_websockets.lock().await;
 
     for (addr, sender) in actives.iter() {
-        if *addr == message.get_addr(){continue;}
+        if *addr == message.get_addr() {
+            continue;
+        }
 
         if let Err(send_error) = sender.send(message.clone()) {
-           log::error!("Could not broadcast message to {addr}: {send_error}");
+            log::error!("Could not broadcast message to {addr}: {send_error}");
             inactive_addrs.push(*addr);
         }
     }
@@ -181,11 +222,15 @@ async fn handle_received_from_server(
             let client_msg = ClientMessage::from(message);
 
             // Serialize and send
-            match serde_json::to_string(&client_msg){
-                Ok(ser_msg) => if write.send(Message::Text(ser_msg.into())).await.is_err() {
-                    log::error!("Could not send message back to client");
+            match serde_json::to_string(&client_msg) {
+                Ok(ser_msg) => {
+                    if write.send(Message::Text(ser_msg.into())).await.is_err() {
+                        log::error!("Could not send message back to client");
+                    }
                 }
-                Err(err) => log::error!("Could not serialize message to be relayed to client: {err}")
+                Err(err) => {
+                    log::error!("Could not serialize message to be relayed to client: {err}")
+                }
             }
         }
         None => log::error!("Nothing came back from recv :("),

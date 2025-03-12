@@ -41,9 +41,6 @@ async fn main() {
         sleep(Duration::from_secs(5)).await;
     };
 
-    // Get username
-    // let username = run_username().unwrap();
-
     // Utilities
     let history: Arc<Mutex<Vec<ClientMessage>>> = Arc::new(Mutex::new(Vec::new()));
     let (notifier_tx, notifier_rx ) = unbounded_channel();     
@@ -61,7 +58,7 @@ async fn main() {
     let history_clone = Arc::clone(&history);
     tokio::spawn(async {
         let terminal = ratatui::init();
-        if let Err(run_error) = tui::run_chat(terminal, history_clone,notifier_rx, input_tx).await{
+        if let Err(run_error) = tui::run_chat(terminal, history_clone, notifier_rx, input_tx).await{
             log::error!("Error while running TUI: {run_error}");
         };
         ratatui::restore();

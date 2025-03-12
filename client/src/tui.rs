@@ -33,6 +33,7 @@ pub async fn run_chat(
     mut notifier_rx: UnboundedReceiver<()>,
     input_tx: UnboundedSender<String>
 ) -> Result<(), Error> {
+
     let mut input_box = Vec::new();
     let mut username = Vec::new();
     let mut keyboard_reader = event::EventStream::new();
@@ -40,7 +41,9 @@ pub async fn run_chat(
 
     // Create layouts
     let username_vert_layout = Layout::vertical([
-        Constraint::Percentage(20)
+        Constraint::Percentage(45),
+        Constraint::Fill(1),
+        Constraint::Percentage(45)
     ]);
     let username_horizontal_layout = Layout::horizontal([
         Constraint::Percentage(50)
@@ -70,7 +73,7 @@ pub async fn run_chat(
             .style(Style::default().fg(Color::White).bg(Color::Black));
 
         let draw_result = terminal.draw(|frame|{
-            let [username_vert_area] = username_vert_layout.areas(frame.area().inner(Margin::new(1, 1)));
+            let [_, username_vert_area, _] = username_vert_layout.areas(frame.area().inner(Margin::new(1, 1)));
             let [username_area] = username_horizontal_layout.areas(username_vert_area);
             frame.render_widget(username_block, username_area);
         });
@@ -90,15 +93,22 @@ pub async fn run_chat(
     }
 
     // TODO: Send username to server
+    let username_string = username.iter().collect::<String>();
+    if input_tx.send(username_string.clone()).is_err(){
+        log::error!("Could not send username message back to main");
+        return Err(std::io::Error::other(""))
+    };
 
     // TODO: Change block from default to bordered
     // Main chat loop
+    let chat_title = format!("Logged in as {username_string}");
     loop {
         // Create outer block
         let outer_block = Block::default()
             .borders(Borders::ALL)
             .padding(PADDING_INSIDE)
-            .style(Style::default().fg(Color::White).bg(Color::Black));
+            .style(Style::default().fg(Color::White).bg(Color::Black))
+            .title_top(Line::from(chat_title.clone()).centered());
 
         // Create message blocks
         let msg_blocks: Vec<(Paragraph, usize)> = history
@@ -182,6 +192,7 @@ pub async fn run_chat(
             // Wait for a change in history notification via "notify_rx"
             _ = notifier_rx.recv() => continue,
 
+            // TODO: use handle_keyboard_event() function instead
             // Wait for a key to be pressed
             keyboard_event = keyboard_reader.next() => match keyboard_event{
                 Some(Ok(event)) => match event {
@@ -236,16 +247,6 @@ fn handle_keyboard_event(keyboard_event: Option<Result<Event, Error>>, buffer: &
                 KeyCode::Backspace => _ = buffer.pop(),
                 KeyCode::Enter => {
                     return HandlingSignal::End;
-                    // let input_string: String = input_box.iter().collect();
-                    // if input_tx.send(input_string.clone()).is_err(){
-                    //     log::error!("Could not send input message back to main")
-                    // };
-                    // 
-                    // // Add input to history and clear input box
-                    // history.lock().await.push(
-                    //     ClientMessage::new("You".to_string(), input_string)
-                    // );
-                    // input_box.clear();
                 },
                 _ => return HandlingSignal::Continue,
             }
@@ -257,10 +258,3 @@ fn handle_keyboard_event(keyboard_event: Option<Result<Event, Error>>, buffer: &
 
     HandlingSignal::Continue
 }
-
-
-// / Creates a startup screen and prompts user for a username
-// / Returns a result containing the username as a string after the first Enter keypress
-// fn run_username(terminal: DefaultTerminal) -> Result<String, Error>{
-//
-// }
