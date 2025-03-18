@@ -68,7 +68,7 @@ async fn main() {
                     Err(_) => {
                         tui_handler.abort();
                         ratatui::restore();
-                        continue 'outer;
+                        return;
                     },
                 },
                 handle_result = handlers::handle_server_message(&mut ws_stream_read, Arc::clone(&history), notifier_tx.clone()) => match handle_result{

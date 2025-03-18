@@ -211,7 +211,7 @@ async fn handle_received_from_client(
     }
 }
 
-/// Broadcasts a message to all connectec websockets in 'active_websockets'
+/// Broadcasts a message to all connected websockets in 'active_websockets'
 async fn broadcast_message(message: ChatMessage, active_websockets: &PeerMap) {
     let mut inactive_addrs: Vec<SocketAddr> = Vec::new();
 
