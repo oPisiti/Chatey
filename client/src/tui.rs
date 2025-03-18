@@ -16,6 +16,7 @@ const MAX_MESSAGES_ON_SCREEN: u8 = 8;
 const PADDING_INSIDE: Padding = Padding::new(1, 1, 0, 0);
 const CURSOR_CHAR: &str = "_";
 const CLIENT_USERNAME: &str = "You";
+const SYSTEM_USERNAME: &str = "SYSTEM";
 
 /// Custom enum for keyboard handling
 enum HandlingSignal{
@@ -58,9 +59,9 @@ pub async fn run_chat(
         MAX_MESSAGES_ON_SCREEN as usize
     ]);
     let msg_horizontal_layout = Layout::horizontal([
-        Constraint::Percentage(40),
+        Constraint::Percentage(35),
         Constraint::Fill(1),
-        Constraint::Percentage(40),
+        Constraint::Percentage(35),
     ]);
 
     // Prompt the user for a username
@@ -84,8 +85,7 @@ pub async fn run_chat(
         }
 
         // Handle input
-        let keyboard_handler_signal = handle_keyboard_event(keyboard_reader.next().await, &mut username);
-        match keyboard_handler_signal{
+        match handle_keyboard_event(keyboard_reader.next().await, &mut username){
             HandlingSignal::Continue => continue,
             HandlingSignal::End => break,
             HandlingSignal::Quit => return Err(std::io::Error::other("")),
@@ -103,8 +103,7 @@ pub async fn run_chat(
     let chat_title = format!("Logged in as {username_string}");
     loop {
         // Create outer block
-        let outer_block = Block::default()
-            .borders(Borders::ALL)
+        let outer_block = Block::bordered()
             .padding(PADDING_INSIDE)
             .style(Style::default().fg(Color::White).bg(Color::Black))
             .title_top(Line::from(chat_title.clone()).centered());
@@ -119,12 +118,14 @@ pub async fn run_chat(
             .map(|client_message| {
                 let position_index: usize = match client_message.get_username().as_str(){
                     CLIENT_USERNAME => 2,
+                    SYSTEM_USERNAME => 1,
                     _ => 0
                 };
 
                 // Define the message title (at the bottom of the paragraph)
                 let mut title = Line::from(client_message.get_metadata());
                 if position_index == 0 {title = title.left_aligned()}
+                else if position_index == 1 {title = title.centered()}
                 else if position_index == 2 {title = title.right_aligned()}
 
                 // Define the paragraph
@@ -143,8 +144,7 @@ pub async fn run_chat(
             .collect();
 
         // Create the input block
-        let mut input_string: String = input_box.iter().collect();
-        input_string += CURSOR_CHAR;
+        let input_string = input_box.iter().collect::<String>() + CURSOR_CHAR;
         let input_block = Paragraph::new(input_string)
             .block(
                 Block::default()
@@ -191,41 +191,25 @@ pub async fn run_chat(
             // Wait for a change in history notification via "notify_rx"
             _ = notifier_rx.recv() => continue,
 
-            // TODO: use handle_keyboard_event() function instead
             // Wait for a key to be pressed
-            keyboard_event = keyboard_reader.next() => match keyboard_event{
-                Some(Ok(event)) => match event {
-                    Event::Key(key) => match key.code{
-                        KeyCode::Esc => break,
-                        KeyCode::Char(char) =>{
-                            if char == 'c' && key.modifiers == KeyModifiers::CONTROL {break;}
-
-                            // Update input box
-                            input_box.push(char);
-                        }
-                        KeyCode::Backspace => _ = input_box.pop(),
-                        KeyCode::Enter => {
-                            let input_string: String = input_box.iter().collect();
-                            if input_tx.send(input_string.clone()).is_err(){
-                                log::error!("Could not send input message back to main")
-                            };
-                            
-                            // Add input to history and clear input box
-                            history.lock().await.push(
-                                ClientMessage::new("You".to_string(), input_string)
-                            );
-                            input_box.clear();
-                        },
-                        _ => continue,
-                    }
-                    _ => continue,
+            keyboard_event = keyboard_reader.next() => match handle_keyboard_event(keyboard_event, &mut input_box){
+                HandlingSignal::Continue => continue,
+                HandlingSignal::End => {
+                    let input_string: String = input_box.iter().collect();
+                    if input_tx.send(input_string.clone()).is_err(){
+                        log::error!("Could not send input message back to main")
+                    };
+                    
+                    // Add input to history and clear input box
+                    history.lock().await.push(
+                        ClientMessage::new("You".to_string(), input_string)
+                    );
+                    input_box.clear();
                 },
-                Some(Err(_)) => break,
-                None => break,
-            },
+                HandlingSignal::Quit => return Err(std::io::Error::other("")),
+            }
         }
     }
-    Ok(())
 }
 
 /// Handles a single keyboard event and returns a signal

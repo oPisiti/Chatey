@@ -10,6 +10,7 @@ pub struct ChatMessage{
     message: String
 }
 impl ChatMessage {
+    /// Attemps to build a ChatMessage instance
     pub fn build(socket: SocketAddr, username: String, message: String) -> Option<Self>{
         Some(Self{
             from_addr: socket,

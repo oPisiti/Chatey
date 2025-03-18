@@ -30,7 +30,8 @@ async fn main() {
     };
 
     // Init logger
-    simple_logging::log_to_file("chatey_client.log", log::LevelFilter::Info).expect("Unable to set log to file");
+    simple_logging::log_to_file("chatey_client.log", log::LevelFilter::Debug).expect("Unable to set log to file");
+
 
     // Attempt to connect to server
     let ws_stream = loop {
