@@ -82,7 +82,7 @@ pub async fn run_chat(
         if draw_result.is_err() {
             log::error!("Failed to render frame: {}", draw_result.unwrap_err());
         }
-        
+
         // Handle input
         let keyboard_handler_signal = handle_keyboard_event(keyboard_reader.next().await, &mut username);
         match keyboard_handler_signal{
@@ -92,14 +92,13 @@ pub async fn run_chat(
         }
     }
 
-    // TODO: Send username to server
+    // Send username to server
     let username_string = username.iter().collect::<String>();
     if input_tx.send(username_string.clone()).is_err(){
         log::error!("Could not send username message back to main");
         return Err(std::io::Error::other(""))
     };
 
-    // TODO: Change block from default to bordered
     // Main chat loop
     let chat_title = format!("Logged in as {username_string}");
     loop {

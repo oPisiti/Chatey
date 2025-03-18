@@ -85,7 +85,7 @@ async fn main() -> io::Result<()> {
                     Err(err) => {
                         log::error!("Invalid username message: {err}. Closing connection");
                         if close_websocket_stream(write, read).await.is_err() {
-                            log::error!("Could not close connection. Aborting all");
+                            log::error!("Could not close connection. Aborting connection");
                         };
                         return;
                     }

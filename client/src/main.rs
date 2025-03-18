@@ -4,7 +4,7 @@ use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use shared::ClientMessage;
+use shared::{ClientMessage, HandleError};
 use tokio::{
     net::TcpStream, select, sync::{mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender}, Mutex}, time::sleep
 };
@@ -46,14 +46,6 @@ async fn main() {
     let (notifier_tx, notifier_rx ) = unbounded_channel();     
     let (input_tx, mut input_rx) = unbounded_channel();
 
-    // TODO: Remove after tests
-    for _ in 0..4{
-        history
-            .lock()
-            .await
-            .push(ClientMessage::new("George".to_string(), "Hellooo".to_string()));
-    }
-
     // Init the TUI
     let history_clone = Arc::clone(&history);
     tokio::spawn(async {
@@ -64,11 +56,15 @@ async fn main() {
         ratatui::restore();
     });
 
+    // TODO: Handle server message properly
     // Handle messages to and from the server
     let (mut ws_stream_write, mut ws_stream_read) = ws_stream.split();
     loop {
         select! {
-            _ = handle_user_input(&mut input_rx, &mut ws_stream_write) => log::debug!("Message captured from user"),
+            handle_result = handle_user_input(&mut input_rx, &mut ws_stream_write) => match handle_result{
+                Ok(_) => log::debug!("Message captured from user"),
+                Err(_) => break,
+            },
             _ = handle_server_message(&mut ws_stream_read, Arc::clone(&history), notifier_tx.clone()) => log::debug!("Message received from server")
         }
     }
@@ -77,7 +73,7 @@ async fn main() {
 async fn handle_user_input(
     receiver: &mut UnboundedReceiver<String>,
     stream_write: &mut WSWrite,
-) {
+) -> Result<(), HandleError>{
     // Wait for an input message from the TUI
     match receiver.recv().await{
         Some(input_string) => {
@@ -88,8 +84,12 @@ async fn handle_user_input(
                 log::error!("Could not send message to server: {err}");
             }
         }
-        None => log::error!("Input message from user not valid"),
+        None => {
+            log::error!("Receiving channel has been closed");
+            return Err(HandleError::ConnectionDropped);
+        },
     }
+    Ok(())
 }
 
 async fn handle_server_message(stream_read: &mut WSRead, history: Arc<Mutex<Vec<ClientMessage>>>, notifier_tx: UnboundedSender<()>) {
