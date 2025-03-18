@@ -193,11 +193,8 @@ async fn handle_received_from_client(
         }
         None => {
             log::info!("Client connection returned None. Removing client from connected peers");
-            let mut sockets = active_websockets.lock().await;
-            sockets.remove(&client_addr);
 
             // Broadcast exit of current user
-            // TODO: Fix exit message not being broadcast
             match ChatMessage::build(client_addr, "SYSTEM".to_string(), format!("{username} has exited the channel")){
                 Some(exit_message) => {
                     log::info!("Broadcasting {username}'s exit message");
