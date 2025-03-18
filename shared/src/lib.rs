@@ -1,6 +1,12 @@
+use futures_util::stream::{SplitSink, SplitStream};
+use tokio::net::TcpStream;
 use std::{fmt, net::SocketAddr, time::Instant};
-
 use serde::{Deserialize, Serialize};
+use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
+
+// Aliases
+pub type WSWrite = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
+pub type WSRead = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
 #[derive(Clone)]
 pub struct ChatMessage{
@@ -91,10 +97,12 @@ impl ClientMessage{
     }
 }
 
+/// Indicates a sucessful handling
 pub enum HandleResult{
     ResponseSuccessful,
 }
 
+/// Indicates a faulty handling
 pub enum HandleError{
     ConnectionDropped,
     MalformedMessage,
