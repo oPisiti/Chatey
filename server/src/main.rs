@@ -100,7 +100,13 @@ async fn main() -> io::Result<()> {
             };
 
             // Save the username in the hashmap
-            cloned_con_to_username.lock().await.insert(ip, username);
+            cloned_con_to_username.lock().await.insert(ip, username.clone());
+
+            // Broadcast arrival of current user
+            match ChatMessage::build(ip, "SYSTEM".to_string(), format!("{username} has entered the channel")){
+                Some(entry_message) => broadcast_message(entry_message, &cloned_active_websockets).await,
+                None => log::error!("Could not create user entry broadcast message"),
+            }
 
             // Keep listening for messages from client or from server
             loop {
@@ -117,8 +123,15 @@ async fn main() -> io::Result<()> {
                             Err(HandleError::UnkownClient) => log::error!("Unkown client"),
                         }
                     },
-                    // TODO: Handle this nicely
-                    _ = handle_received_from_server(&mut rx, &mut write) => log::debug!("Message retransmitted to client"),
+                    handle_result = handle_received_from_server(&mut rx, &mut write) => match handle_result {
+                        Ok(HandleResult::ResponseSuccessful) => log::debug!("Response successfully sent to {} ({ip})", cloned_con_to_username.lock().await.get(&ip).unwrap_or(&"Unknown".to_string())),
+                        Err(HandleError::MalformedMessage) => log::debug!("Malformed message received from client {ip}. Ignoring"),
+                        Err(HandleError::ConnectionDropped) => {
+                            log::debug!("Connection with client {ip} interrupted.");
+                            return;
+                        },
+                        Err(HandleError::UnkownClient) => log::error!("Unkown client"),
+                    }
                 }
             }
         });
@@ -157,17 +170,18 @@ async fn handle_received_from_client(
     stream_read: &mut SplitStream<WebSocketStream<TcpStream>>,
     client_addr: SocketAddr,
 ) -> Result<HandleResult, HandleError> {
+
+    let username = con_to_username
+        .lock()
+        .await
+        .get(&client_addr)
+        .ok_or(HandleError::UnkownClient)?
+        .to_owned();
+
     match stream_read.next().await {
         Some(message_result) => {
             if let Ok(message) = message_result {
                 // Wrap the tungstenite message in a ChatMessage
-                let username = con_to_username
-                    .lock()
-                    .await
-                    .get(&client_addr)
-                    .ok_or(HandleError::UnkownClient)?
-                    .to_owned();
-
                 let chat_message = ChatMessage::build(client_addr, username, message.to_string())
                     .ok_or(HandleError::MalformedMessage)?;
 
@@ -181,6 +195,17 @@ async fn handle_received_from_client(
             log::info!("Client connection returned None. Removing client from connected peers");
             let mut sockets = active_websockets.lock().await;
             sockets.remove(&client_addr);
+
+            // Broadcast exit of current user
+            // TODO: Fix exit message not being broadcast
+            match ChatMessage::build(client_addr, "SYSTEM".to_string(), format!("{username} has exited the channel")){
+                Some(exit_message) => {
+                    log::info!("Broadcasting {username}'s exit message");
+                    broadcast_message(exit_message, active_websockets).await;
+                },
+                None => log::error!("Could not create user {username}'s exit broadcast message"),
+            }
+
             Err(HandleError::ConnectionDropped)
         }
     }
@@ -214,8 +239,8 @@ async fn broadcast_message(message: ChatMessage, active_websockets: &PeerMap) {
 /// Relays message to specified client
 async fn handle_received_from_server(
     rx: &mut UnboundedReceiver<ChatMessage>,
-    write: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
-) {
+    write: &mut SplitSink<WebSocketStream<TcpStream>, Message>
+) -> Result<HandleResult, HandleError> {
     match rx.recv().await {
         Some(message) => {
             // Create a ClientMessage
@@ -226,13 +251,20 @@ async fn handle_received_from_server(
                 Ok(ser_msg) => {
                     if write.send(Message::Text(ser_msg.into())).await.is_err() {
                         log::error!("Could not send message back to client");
+                        return Err(HandleError::ConnectionDropped);
                     }
+
+                    Ok(HandleResult::ResponseSuccessful)
                 }
                 Err(err) => {
-                    log::error!("Could not serialize message to be relayed to client: {err}")
+                    log::error!("Could not serialize message to be relayed to client: {err}");
+                    Err(HandleError::MalformedMessage)
                 }
             }
         }
-        None => log::error!("Nothing came back from recv :("),
-    };
+        None => {
+            log::error!("Nothing came back from recv :(");
+            Err(HandleError::MalformedMessage)
+        },
+    }
 }
