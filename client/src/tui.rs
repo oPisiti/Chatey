@@ -151,7 +151,8 @@ pub async fn run_chat(
                     )
                     .style(Style::default().fg(Color::White).bg(Color::Black));
 
-                if position_index == 2 {parag = parag.right_aligned()} 
+                if position_index == 1 {parag = parag.centered()} 
+                else if position_index == 2 {parag = parag.right_aligned()} 
 
                 (parag, position_index)
             })
