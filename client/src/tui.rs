@@ -1,6 +1,6 @@
-use std::{io::Error, sync::Arc};
+use std::{cmp::{max, min}, io::Error, sync::Arc};
 
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers, MouseEventKind};
 use futures_util::StreamExt;
 use ratatui::{
     layout::{Constraint, Flex, Layout, Margin, Rect}, style::{Color, Style}, text::Line, widgets::{Block, BorderType, Borders, Padding, Paragraph}, DefaultTerminal
@@ -12,7 +12,8 @@ use tokio::{
 };
 
 // Constants
-const MAX_MESSAGES_ON_SCREEN: u8 = 8;
+const MAX_MESSAGES_ON_SCREEN: u8 = 8;      // Maximum number of messages on screen
+const MIN_MESSAGES_ON_SCREEN: usize = 4;   // Minimum (if there are enough) messages on screen
 const PADDING_INSIDE: Padding = Padding::new(1, 1, 0, 0);
 const CURSOR_CHAR: &str = "_";
 const CLIENT_USERNAME: &str = "You";
@@ -29,7 +30,7 @@ enum HandlingSignal{
 /// The loop awaits until a '()' notification is received via 'notify_rx'
 /// The TUI will NOT be updated otherwise
 pub async fn run_chat(
-    terminal: DefaultTerminal,
+    mut terminal: DefaultTerminal,
     history: Arc<Mutex<Vec<ClientMessage>>>,
     mut notifier_rx: UnboundedReceiver<()>,
     input_tx: UnboundedSender<String>
@@ -37,8 +38,9 @@ pub async fn run_chat(
 
     let mut input_box = Vec::new();
     let mut username = Vec::new();
-    let mut keyboard_reader = event::EventStream::new();
-    let mut terminal = terminal;
+    let mut event_reader = event::EventStream::new();
+    let mut scroll_movement = 0i8;
+    let mut scroll_pos = 0usize;
 
     // Create layouts
     let username_vert_layout = Layout::vertical([
@@ -85,7 +87,7 @@ pub async fn run_chat(
         }
 
         // Handle input
-        match handle_keyboard_event(keyboard_reader.next().await, &mut username){
+        match handle_input_event(event_reader.next().await, &mut username, &mut scroll_movement){
             HandlingSignal::Continue => continue,
             HandlingSignal::End => break,
             HandlingSignal::Quit => return Err(std::io::Error::other("")),
@@ -102,6 +104,13 @@ pub async fn run_chat(
     // Main chat loop
     let chat_title = format!("Logged in as {username_string}");
     loop {
+        // Determine the scrolling position 
+        let history_size = history.lock().await.len();
+        let tmp_scroll_pos = (scroll_pos as i64) + (scroll_movement as i64);
+        scroll_pos = max(0, min(tmp_scroll_pos, u16::MAX as i64)) as usize;
+        scroll_pos = min(scroll_pos, history_size);
+        scroll_movement = 0;
+
         // Create outer block
         let outer_block = Block::bordered()
             .padding(PADDING_INSIDE)
@@ -114,6 +123,7 @@ pub async fn run_chat(
             .await
             .iter()
             .rev()
+            .skip(scroll_pos)
             .take(MAX_MESSAGES_ON_SCREEN as usize)
             .map(|client_message| {
                 let position_index: usize = match client_message.get_username().as_str(){
@@ -192,7 +202,7 @@ pub async fn run_chat(
             _ = notifier_rx.recv() => continue,
 
             // Wait for a key to be pressed
-            keyboard_event = keyboard_reader.next() => match handle_keyboard_event(keyboard_event, &mut input_box){
+            event = event_reader.next() => match handle_input_event(event, &mut input_box, &mut scroll_movement){
                 HandlingSignal::Continue => continue,
                 HandlingSignal::End => {
                     let input_string: String = input_box.iter().collect();
@@ -214,7 +224,7 @@ pub async fn run_chat(
 
 /// Handles a single keyboard event and returns a signal
 /// Will write char to buffer, as well as pop from it in case of Backspace input
-fn handle_keyboard_event(keyboard_event: Option<Result<Event, Error>>, buffer: &mut Vec<char>) -> HandlingSignal {
+fn handle_input_event(keyboard_event: Option<Result<Event, Error>>, buffer: &mut Vec<char>, scroll: &mut i8) -> HandlingSignal {
     match keyboard_event{
         Some(Ok(event)) => match event {
             Event::Key(key) => match key.code{
@@ -231,6 +241,11 @@ fn handle_keyboard_event(keyboard_event: Option<Result<Event, Error>>, buffer: &
                 KeyCode::Enter => {
                     return HandlingSignal::End;
                 },
+                _ => return HandlingSignal::Continue,
+            }
+            Event::Mouse(mouse) => match mouse.kind{
+                MouseEventKind::ScrollDown => *scroll = -1,
+                MouseEventKind::ScrollUp => *scroll = 1,
                 _ => return HandlingSignal::Continue,
             }
             _ => return HandlingSignal::Continue,

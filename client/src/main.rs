@@ -1,5 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
+use crossterm::{event::EnableMouseCapture, execute};
 use futures_util::StreamExt;
 use shared::ClientMessage;
 use tokio::{
@@ -28,6 +29,9 @@ async fn main() {
     // Init logger
     simple_logging::log_to_file("chatey_client.log", log::LevelFilter::Debug)
         .expect("Unable to set log to file");
+
+    // Bind the mouse scroll wheel
+    execute!(std::io::stdout(), EnableMouseCapture).expect("Could not bind scrol wheel");
 
     // Connection loop
     'outer: loop{
