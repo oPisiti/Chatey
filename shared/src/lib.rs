@@ -1,3 +1,13 @@
+//********************************************************************
+// Author: Lauro França (oPisiti)                                    #
+// Contact:                                                          #
+//   github: oPisiti                                                 #
+//   Email: contact@opisiti.com                                      #
+// Date: 2025                                                        #
+// Description:                                                      #
+//   The shared custom library for both client and server            #
+//********************************************************************
+
 use futures_util::stream::{SplitSink, SplitStream};
 use tokio::net::TcpStream;
 use std::{fmt, net::SocketAddr, time::Instant};

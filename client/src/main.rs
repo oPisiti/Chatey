@@ -1,3 +1,14 @@
+//********************************************************************
+// Author: Lauro França (oPisiti)                                    #
+// Contact:                                                          #
+//   github: oPisiti                                                 #
+//   Email: contact@opisiti.com                                      #
+// Date: 2025                                                        #
+// Description:                                                      #
+//   The main function for the chat client                           #
+//********************************************************************
+
+
 use std::{sync::Arc, time::Duration};
 
 use crossterm::{event::EnableMouseCapture, execute};

@@ -1,3 +1,11 @@
+//********************************************************************
+// Author: Lauro França (oPisiti)                                    #
+// Contact:                                                          #
+//   github: oPisiti                                                 #
+//   Email: contact@opisiti.com                                      #
+// Date: 2025                                                        #
+//********************************************************************
+
 use crossterm::event::{Event, KeyCode, KeyModifiers, MouseEventKind};
 use futures_util::{
     SinkExt, StreamExt,

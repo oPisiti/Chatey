@@ -1,3 +1,11 @@
+//********************************************************************
+// Author: Lauro França (oPisiti)                                    #
+// Contact:                                                          #
+//   github: oPisiti                                                 #
+//   Email: contact@opisiti.com                                      #
+// Date: 2025                                                        #
+//********************************************************************
+
 use std::{cmp::min, io::Error, sync::Arc};
 
 use crossterm::event::{self};
