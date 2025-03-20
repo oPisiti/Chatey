@@ -1,11 +1,19 @@
+use crossterm::event::{Event, KeyCode, KeyModifiers, MouseEventKind};
 use futures_util::{
     SinkExt, StreamExt,
 };
-use std::sync::Arc;
+use std::{io::Error, sync::Arc};
 use shared::{ClientMessage, HandleError, WSRead, WSWrite};
 use tokio::sync::{mpsc::{UnboundedReceiver, UnboundedSender}, Mutex};
 use tokio_tungstenite::tungstenite::Message;
 
+
+/// Custom enum for keyboard handling
+pub enum HandlingSignal{
+    Continue,
+    End,
+    Quit,
+}
 
 /// Awaits a message from receiver and attempts to relay it to the server
 /// If the received message is None, returns a "HandleError::ConnectionDropped" error
@@ -64,4 +72,39 @@ pub async fn handle_server_message(
     }
 
     Ok(())
+}
+
+/// Handles a single keyboard event and returns a signal
+/// Will write char to buffer, as well as pop from it in case of Backspace input
+pub fn handle_input_event(keyboard_event: Option<Result<Event, Error>>, buffer: &mut Vec<char>, scroll: &mut i8) -> HandlingSignal {
+    match keyboard_event{
+        Some(Ok(event)) => match event {
+            Event::Key(key) => match key.code{
+                KeyCode::Esc => return HandlingSignal::Quit,
+                KeyCode::Char(char) =>{
+                    if char == 'c' && key.modifiers == KeyModifiers::CONTROL {
+                        return HandlingSignal::Quit
+                    }
+
+                    // Update input box
+                    buffer.push(char);
+                }
+                KeyCode::Backspace => _ = buffer.pop(),
+                KeyCode::Enter => {
+                    return HandlingSignal::End;
+                },
+                _ => return HandlingSignal::Continue,
+            }
+            Event::Mouse(mouse) => match mouse.kind{
+                MouseEventKind::ScrollDown => *scroll = -1,
+                MouseEventKind::ScrollUp => *scroll = 1,
+                _ => return HandlingSignal::Continue,
+            }
+            _ => return HandlingSignal::Continue,
+        },
+        Some(Err(_)) => return HandlingSignal::Quit,
+        None => return HandlingSignal::Quit,
+    }
+
+    HandlingSignal::Continue
 }

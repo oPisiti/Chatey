@@ -1,6 +1,6 @@
-use std::{cmp::{max, min}, io::Error, sync::Arc};
+use std::{cmp::min, io::Error, sync::Arc};
 
-use crossterm::event::{self, Event, KeyCode, KeyModifiers, MouseEventKind};
+use crossterm::event::{self};
 use futures_util::StreamExt;
 use ratatui::{
     layout::{Constraint, Flex, Layout, Margin, Rect}, style::{Color, Style}, text::Line, widgets::{Block, BorderType, Borders, Padding, Paragraph}, DefaultTerminal
@@ -11,20 +11,15 @@ use tokio::{
     sync::{mpsc::{UnboundedReceiver, UnboundedSender}, Mutex},
 };
 
+use crate::handlers::{handle_input_event, HandlingSignal};
+
 // Constants
 const MAX_MESSAGES_ON_SCREEN: u8 = 8;      // Maximum number of messages on screen
-const MIN_MESSAGES_ON_SCREEN: usize = 4;   // Minimum (if there are enough) messages on screen
 const PADDING_INSIDE: Padding = Padding::new(1, 1, 0, 0);
 const CURSOR_CHAR: &str = "_";
 const CLIENT_USERNAME: &str = "You";
 const SYSTEM_USERNAME: &str = "SYSTEM";
 
-/// Custom enum for keyboard handling
-enum HandlingSignal{
-    Continue,
-    End,
-    Quit,
-}
 
 /// Runs the TUI loop and prints the latest messages in 'history'
 /// The loop awaits until a '()' notification is received via 'notify_rx'
@@ -107,8 +102,9 @@ pub async fn run_chat(
         // Determine the scrolling position 
         let history_size = history.lock().await.len();
         let tmp_scroll_pos = (scroll_pos as i64) + (scroll_movement as i64);
-        scroll_pos = max(0, min(tmp_scroll_pos, u16::MAX as i64)) as usize;
-        scroll_pos = min(scroll_pos, history_size);
+        scroll_pos = tmp_scroll_pos.clamp(0, u16::MAX.into()) as usize;
+        let max_acceptable = (history_size as i32 - MAX_MESSAGES_ON_SCREEN as i32).clamp(0, u16::MAX.into()) as usize;
+        scroll_pos = min(scroll_pos, max_acceptable);
         scroll_movement = 0;
 
         // Create outer block
@@ -220,39 +216,4 @@ pub async fn run_chat(
             }
         }
     }
-}
-
-/// Handles a single keyboard event and returns a signal
-/// Will write char to buffer, as well as pop from it in case of Backspace input
-fn handle_input_event(keyboard_event: Option<Result<Event, Error>>, buffer: &mut Vec<char>, scroll: &mut i8) -> HandlingSignal {
-    match keyboard_event{
-        Some(Ok(event)) => match event {
-            Event::Key(key) => match key.code{
-                KeyCode::Esc => return HandlingSignal::Quit,
-                KeyCode::Char(char) =>{
-                    if char == 'c' && key.modifiers == KeyModifiers::CONTROL {
-                        return HandlingSignal::Quit
-                    }
-
-                    // Update input box
-                    buffer.push(char);
-                }
-                KeyCode::Backspace => _ = buffer.pop(),
-                KeyCode::Enter => {
-                    return HandlingSignal::End;
-                },
-                _ => return HandlingSignal::Continue,
-            }
-            Event::Mouse(mouse) => match mouse.kind{
-                MouseEventKind::ScrollDown => *scroll = -1,
-                MouseEventKind::ScrollUp => *scroll = 1,
-                _ => return HandlingSignal::Continue,
-            }
-            _ => return HandlingSignal::Continue,
-        },
-        Some(Err(_)) => return HandlingSignal::Quit,
-        None => return HandlingSignal::Quit,
-    }
-
-    HandlingSignal::Continue
 }
