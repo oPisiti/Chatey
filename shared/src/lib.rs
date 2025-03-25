@@ -103,7 +103,29 @@ impl ClientMessage{
 
     /// Returns a pretty string containing user and timestamp
     pub fn get_metadata(&self) -> String{
-        format!("{}, {} s ago", self.from_username, self.timestamp.elapsed().as_secs())
+        let time_lengths = [
+            (60.0, "s"),
+            (60.0, "min"),
+            (24.0, "h"),
+            (365.0, "day(s)"),
+            (1000.0, "year(s)"),
+        ];
+
+        let mut time = self.timestamp.elapsed().as_secs() as f32;
+        let mut tmp;
+        let mut unit = "s";
+        for (multi, multi_unit) in time_lengths{
+            tmp = time / multi; 
+
+            if tmp < 1.0 {
+                unit = multi_unit;
+                break;
+            }
+
+            time = tmp;
+        }
+
+        format!("{}, {} {} ago", self.from_username, time.clamp(0.0, u16::MAX as f32) as u16, unit)
     }
 }
 

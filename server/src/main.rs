@@ -55,7 +55,7 @@ async fn main() -> io::Result<()> {
 
     // The main task will handle listening
     let listening_port = "5050";
-    let listener = TcpListener::bind("127.0.0.1:".to_string() + listening_port).await?;
+    let listener = TcpListener::bind("0.0.0.0:".to_string() + listening_port).await?;
 
     log::info!("Listening for incoming connections on port {listening_port}");
 
