@@ -11,7 +11,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use crossterm::{event::EnableMouseCapture, execute};
+use crossterm::{event::{DisableMouseCapture, EnableMouseCapture}, execute, terminal::{disable_raw_mode, enable_raw_mode}};
 use futures_util::StreamExt;
 use shared::ClientMessage;
 use tokio::{
@@ -43,6 +43,8 @@ async fn main() {
 
     // Bind the mouse scroll wheel
     execute!(std::io::stdout(), EnableMouseCapture).expect("Could not bind scrol wheel");
+
+    enable_raw_mode().expect("Could not enable terminal raw mode");
 
     // Connection loop
     'outer: loop{
@@ -82,8 +84,7 @@ async fn main() {
                     Ok(_) => log::debug!("Message captured from user"),
                     Err(_) => {
                         tui_handler.abort();
-                        ratatui::restore();
-                        return;
+                        break 'outer;
                     },
                 },
                 handle_result = handlers::handle_server_message(&mut ws_stream_read, Arc::clone(&history), notifier_tx.clone()) => match handle_result{
@@ -97,4 +98,9 @@ async fn main() {
             }
         }
     }
+
+    // Cleanup
+    ratatui::restore();
+    execute!(std::io::stdout(), DisableMouseCapture).expect("Could not unbind scrol wheel");
+    disable_raw_mode().expect("Could not disable raw mode");
 }
