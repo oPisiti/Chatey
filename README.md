@@ -3,9 +3,13 @@
 ![chatey](https://github.com/user-attachments/assets/55049337-73b1-4b95-a861-55e347638850)
 
 ## Description
-A webchat application using websockets.
+A webchat application based on websockets. Includes both server and client applications.
 
-Includes both server and client applications
+At startup, the client prompts for a username, which will then sign all of their messages.
+
+Each message sent to and relayed from the server contains a timestamp, the user and the actual message, which are displayed in bubbles via the TUI.
+
+The TUI also indicates entries and departures from the chatroom.
 
 ## Setup
 Download rust, clone the repo and use :)
@@ -15,6 +19,8 @@ Download rust, clone the repo and use :)
 This repo provides a basic bash script (tmux.sh) which sets up multiple tmux panes.
 
 Running it will spin up the server, along with two clients.
+
+OR
 
 ### 1. Start the server
 Run 
